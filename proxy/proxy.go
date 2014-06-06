@@ -15,6 +15,7 @@ type Proxy struct {
 	listener       *net.TCPListener
 	server         *rpc.Server
 	consumers      map[string]*rpc.Client
+	subscribers    map[string]*rpc.Client
 }
 
 func New() (result *Proxy) {
@@ -45,8 +46,13 @@ func (self *Proxy) consume() {
 			self.newConsumerSem.Wait()
 		}
 		for addr, client := range self.consumers {
-			if err := client.Call("Consumer.Consume", b, &struct{}{}); err != nil {
+			if err := client.Call("rpc.Consume", b, &struct{}{}); err != nil {
 				delete(self.consumers, addr)
+			}
+		}
+		for addr, client := range self.subscribers {
+			if err := client.Call("rpc.Receive", b, &struct{}{}); err != nil {
+				delete(self.subscribers, addr)
 			}
 		}
 		self.lock.Unlock()
@@ -73,6 +79,20 @@ func (self *Proxy) Connect(addr string, unused *struct{}) (err error) {
 	go self.consume()
 
 	go self.receiveFromRemote(self.conn)
+
+	return
+}
+
+func (self *Proxy) Subscribe(addr string, unused *struct{}) (err error) {
+	client, err := rpc.Dial("tcp", addr)
+	if err != nil {
+		return
+	}
+
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	self.subscribers[addr] = client
 
 	return
 }
@@ -104,7 +124,7 @@ func (self *Proxy) Listen(addr string, unused *struct{}) (err error) {
 	}
 
 	self.server = rpc.NewServer()
-	self.server.Register(self)
+	self.server.RegisterName("rpc", self)
 	self.server.Accept(self.listener)
 
 	return

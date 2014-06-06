@@ -9,6 +9,7 @@ type point struct {
 
 type Controller struct {
 	cursor point
+	buffer []rune
 }
 
 func New() *Controller {
@@ -26,6 +27,7 @@ func (self *Controller) updateCursor() (err error) {
 func (self *Controller) write(ev termbox.Event) (err error) {
 	if ev.Key == termbox.KeySpace {
 		termbox.SetCell(self.cursor.x, self.cursor.y, 32, termbox.ColorDefault, termbox.ColorDefault)
+		self.buffer = append(self.buffer, 32)
 	} else if ev.Key == termbox.KeyEnter {
 		if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
 			return
@@ -40,15 +42,17 @@ func (self *Controller) write(ev termbox.Event) (err error) {
 		return
 	} else {
 		termbox.SetCell(self.cursor.x, self.cursor.y, ev.Ch, termbox.ColorDefault, termbox.ColorDefault)
+		self.buffer = append(self.buffer, ev.Ch)
 	}
 	if err = termbox.Flush(); err != nil {
 		return
 	}
-	if self.cursor.y >= ev.Width {
-		self.cursor.y = 0
-		self.cursor.x += 1
-	} else {
+	width, _ := termbox.Size()
+	if self.cursor.x >= width-1 {
+		self.cursor.x = 0
 		self.cursor.y += 1
+	} else {
+		self.cursor.x += 1
 	}
 	if err = self.updateCursor(); err != nil {
 		return

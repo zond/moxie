@@ -30,7 +30,7 @@ func (self *Consumer) Listen(hostname string, unused *struct{}) (err error) {
 	}
 
 	self.server = rpc.NewServer()
-	self.server.Register(self)
+	self.server.RegisterName("rpc", self)
 	go func() {
 		self.server.Accept(self.listener)
 		close(self.done)
@@ -49,7 +49,7 @@ func (self *Consumer) Connect(addr string, unused *struct{}) (err error) {
 		return
 	}
 
-	if err = self.client.Call("Proxy.Consume", self.listener.Addr().String(), &struct{}{}); err != nil {
+	if err = self.client.Call("rpc.Consume", self.listener.Addr().String(), &struct{}{}); err != nil {
 		return
 	}
 
