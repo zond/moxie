@@ -2,13 +2,8 @@ package controller
 
 import "github.com/nsf/termbox-go"
 
-type point struct {
-	x int
-	y int
-}
-
 type Controller struct {
-	cursor point
+	cursor int
 	buffer []rune
 }
 
@@ -16,45 +11,78 @@ func New() *Controller {
 	return &Controller{}
 }
 
-func (self *Controller) updateCursor() (err error) {
-	termbox.SetCursor(self.cursor.x, self.cursor.y)
+func (self *Controller) update() (err error) {
+	width, height := termbox.Size()
+	if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
+		return
+	}
+	for index, ch := range self.buffer {
+		x, y := index%width, index/width
+		termbox.SetCell(x, y, ch, termbox.ColorDefault, termbox.ColorDefault)
+	}
+	cursorX, cursorY := self.cursor%width, self.cursor/width
+	if cursorY >= height {
+		cursorX, cursorY = width, height
+	}
+	termbox.SetCursor(cursorX, cursorY)
 	if err = termbox.Flush(); err != nil {
 		return
 	}
 	return
 }
 
+func (self *Controller) insert(ch rune) {
+	if self.cursor == len(self.buffer) {
+		self.buffer = append(self.buffer, ch)
+	} else if self.cursor == 0 {
+		self.buffer = append([]rune{ch}, self.buffer...)
+	} else {
+		self.buffer = append(self.buffer[:self.cursor], append([]rune{ch}, self.buffer[self.cursor:]...)...)
+	}
+	self.cursor += 1
+}
+
+func (self *Controller) backspace() {
+	if self.cursor == len(self.buffer) {
+		self.buffer = self.buffer[:len(self.buffer)-1]
+		self.cursor -= 1
+	} else if self.cursor > 0 {
+		self.buffer = append(self.buffer[:self.cursor-1], self.buffer[self.cursor:]...)
+		self.cursor -= 1
+	}
+}
+
 func (self *Controller) write(ev termbox.Event) (err error) {
-	if ev.Key == termbox.KeySpace {
-		termbox.SetCell(self.cursor.x, self.cursor.y, 32, termbox.ColorDefault, termbox.ColorDefault)
-		self.buffer = append(self.buffer, 32)
-	} else if ev.Key == termbox.KeyEnter {
+	width, height := termbox.Size()
+	switch ev.Key {
+	case termbox.KeySpace:
+		if self.cursor < width*height-1 {
+			self.insert(32)
+		}
+	case termbox.KeyEnter:
 		if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
 			return
 		}
-		if err = termbox.Flush(); err != nil {
-			return
+		self.buffer = nil
+		self.cursor = 0
+	case termbox.KeyBackspace2:
+		if self.cursor > 0 {
+			self.backspace()
 		}
-		self.cursor = point{0, 0}
-		if err = self.updateCursor(); err != nil {
-			return
+	case termbox.KeyArrowLeft:
+		if self.cursor > 0 {
+			self.cursor -= 1
 		}
-		return
-	} else {
-		termbox.SetCell(self.cursor.x, self.cursor.y, ev.Ch, termbox.ColorDefault, termbox.ColorDefault)
-		self.buffer = append(self.buffer, ev.Ch)
+	case termbox.KeyArrowRight:
+		if self.cursor < len(self.buffer) {
+			self.cursor += 1
+		}
+	default:
+		if self.cursor < width*height-1 {
+			self.insert(ev.Ch)
+		}
 	}
-	if err = termbox.Flush(); err != nil {
-		return
-	}
-	width, _ := termbox.Size()
-	if self.cursor.x >= width-1 {
-		self.cursor.x = 0
-		self.cursor.y += 1
-	} else {
-		self.cursor.x += 1
-	}
-	if err = self.updateCursor(); err != nil {
+	if err = self.update(); err != nil {
 		return
 	}
 	return
@@ -65,17 +93,22 @@ func (self *Controller) Control(unused struct{}, unused2 *struct{}) (err error) 
 		return
 	}
 	defer termbox.Close()
-	if err = self.updateCursor(); err != nil {
+	if err = self.update(); err != nil {
 		return
 	}
 	for ev := termbox.PollEvent(); ; ev = termbox.PollEvent() {
-		if ev.Type == termbox.EventKey {
+		switch ev.Type {
+		case termbox.EventKey:
 			if ev.Key == termbox.KeyCtrlC {
-				break
+				return
 			} else {
 				if err = self.write(ev); err != nil {
 					return
 				}
+			}
+		case termbox.EventResize:
+			if err = self.update(); err != nil {
+				return
 			}
 		}
 	}
