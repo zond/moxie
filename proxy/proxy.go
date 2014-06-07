@@ -83,6 +83,18 @@ func (self *Proxy) Connect(addr string, unused *struct{}) (err error) {
 	return
 }
 
+func (self *Proxy) Transmit(s string, unused *struct{}) (err error) {
+	toWrite := []byte(s)
+	wrote := 0
+	for len(toWrite) > 0 {
+		if wrote, err = self.conn.Write(toWrite); err != nil {
+			return
+		}
+		toWrite = toWrite[wrote:]
+	}
+	return
+}
+
 func (self *Proxy) Subscribe(addr string, unused *struct{}) (err error) {
 	client, err := rpc.Dial("tcp", addr)
 	if err != nil {

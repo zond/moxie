@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"fmt"
+	"net/rpc"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,10 +32,18 @@ type Controller struct {
 	lastHistory   []byte
 	mode          int
 	historySearch []rune
+	client        *rpc.Client
 }
 
 func New() *Controller {
 	return &Controller{}
+}
+
+func (self *Controller) Connect(addr string, unused *struct{}) (err error) {
+	if self.client, err = rpc.Dial("tcp", addr); err != nil {
+		return
+	}
+	return
 }
 
 func (self *Controller) Dir(d string) *Controller {
@@ -281,6 +290,9 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 				switch self.mode {
 				case regular:
 					if len(self.buffer) > 0 {
+						if err = self.client.Call("rpc.Transmit", string(self.buffer)+"\n", &struct{}{}); err != nil {
+							return
+						}
 						if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
 							return
 						}
