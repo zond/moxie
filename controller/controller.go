@@ -1,14 +1,31 @@
 package controller
 
-import "github.com/nsf/termbox-go"
+import (
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/boltdb/bolt"
+	"github.com/nsf/termbox-go"
+)
+
+var history = []byte("history")
 
 type Controller struct {
-	cursor int
-	buffer []rune
+	cursor      int
+	buffer      []rune
+	dir         string
+	db          *bolt.DB
+	lastHistory []byte
 }
 
 func New() *Controller {
 	return &Controller{}
+}
+
+func (self *Controller) Dir(d string) *Controller {
+	self.dir = d
+	return self
 }
 
 func (self *Controller) update() (err error) {
@@ -52,43 +69,190 @@ func (self *Controller) backspace() {
 	}
 }
 
-func (self *Controller) write(ev termbox.Event) (err error) {
-	width, height := termbox.Size()
-	switch ev.Key {
-	case termbox.KeySpace:
-		if self.cursor < width*height-1 {
-			self.insert(32)
-		}
-	case termbox.KeyEnter:
-		if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
-			return
-		}
-		self.buffer = nil
-		self.cursor = 0
-	case termbox.KeyBackspace2:
-		if self.cursor > 0 {
-			self.backspace()
-		}
-	case termbox.KeyArrowLeft:
-		if self.cursor > 0 {
-			self.cursor -= 1
-		}
-	case termbox.KeyArrowRight:
-		if self.cursor < len(self.buffer) {
-			self.cursor += 1
-		}
-	default:
-		if self.cursor < width*height-1 {
-			self.insert(ev.Ch)
-		}
+func (self *Controller) timeToBytes(t time.Time) (result []byte) {
+	result = make([]byte, 8)
+	ns := t.UnixNano()
+	result[7] = byte(ns)
+	result[6] = byte(ns >> 8)
+	result[5] = byte(ns >> 16)
+	result[4] = byte(ns >> 24)
+	result[3] = byte(ns >> 32)
+	result[2] = byte(ns >> 40)
+	result[1] = byte(ns >> 48)
+	result[0] = byte(ns >> 56)
+	return
+}
+
+func (self *Controller) pushHistory(b []rune) (err error) {
+	tx, err := self.db.Begin(true)
+	if err != nil {
+		return
 	}
-	if err = self.update(); err != nil {
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+	}()
+	bucket, err := tx.CreateBucketIfNotExists(history)
+	if err != nil {
+		return
+	}
+	if err = bucket.Put(self.timeToBytes(time.Now()), []byte(string(b))); err != nil {
 		return
 	}
 	return
 }
 
+type CtrlC string
+
+func (self CtrlC) Error() string {
+	return string(self)
+}
+
+func (self *Controller) nextHistory(lastHistory []byte) (newHistory, result []byte, found bool, err error) {
+	if lastHistory == nil {
+		return
+	}
+	tx, err := self.db.Begin(true)
+	if err != nil {
+		return
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+	}()
+	bucket, err := tx.CreateBucketIfNotExists(history)
+	if err != nil {
+		return
+	}
+	cursor := bucket.Cursor()
+	if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
+		found = false
+	} else {
+		newHistory, result = cursor.Next()
+		found = true
+	}
+	return
+}
+
+func (self *Controller) prevHistory(lastHistory []byte) (newHistory, result []byte, found bool, err error) {
+	tx, err := self.db.Begin(true)
+	if err != nil {
+		return
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+	}()
+	bucket, err := tx.CreateBucketIfNotExists(history)
+	if err != nil {
+		return
+	}
+	cursor := bucket.Cursor()
+	if lastHistory == nil {
+		newHistory, result = cursor.Last()
+		found = newHistory != nil
+	} else {
+		if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
+			found = false
+		} else {
+			newHistory, result = cursor.Prev()
+			found = newHistory != nil
+		}
+	}
+	return
+}
+
+func (self *Controller) handle(ev termbox.Event) (err error) {
+	switch ev.Type {
+	case termbox.EventKey:
+		if ev.Key == termbox.KeyCtrlC {
+			err = CtrlC("QUIT")
+			return
+		} else {
+			width, height := termbox.Size()
+			switch ev.Key {
+			case termbox.KeySpace:
+				if self.cursor < width*height-1 {
+					self.insert(32)
+				}
+			case termbox.KeyEnter:
+				if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
+					return
+				}
+				if err = self.pushHistory(self.buffer); err != nil {
+					return
+				}
+				self.buffer = nil
+				self.cursor = 0
+				self.lastHistory = nil
+			case termbox.KeyArrowDown:
+				var hist []byte
+				var found bool
+				self.lastHistory, hist, found, err = self.nextHistory(self.lastHistory)
+				if err != nil {
+					return
+				}
+				if found {
+					self.buffer = []rune(string(hist))
+					self.cursor = len(self.buffer)
+				}
+			case termbox.KeyArrowUp:
+				var hist []byte
+				var found bool
+				self.lastHistory, hist, found, err = self.prevHistory(self.lastHistory)
+				if err != nil {
+					return
+				}
+				if found {
+					self.buffer = []rune(string(hist))
+					self.cursor = len(self.buffer)
+				}
+			case termbox.KeyBackspace2:
+				if self.cursor > 0 {
+					self.backspace()
+				}
+			case termbox.KeyArrowLeft:
+				if self.cursor > 0 {
+					self.cursor -= 1
+				}
+			case termbox.KeyArrowRight:
+				if self.cursor < len(self.buffer) {
+					self.cursor += 1
+				}
+			default:
+				if self.cursor < width*height-1 {
+					self.insert(ev.Ch)
+				}
+			}
+			if err = self.update(); err != nil {
+				return
+			}
+			return
+		}
+	case termbox.EventResize:
+		if err = self.update(); err != nil {
+			return
+		}
+	}
+	return
+}
+
 func (self *Controller) Control(unused struct{}, unused2 *struct{}) (err error) {
+	if err = os.MkdirAll(self.dir, 0700); err != nil && !os.IsExist(err) {
+		return
+	}
+	if self.db, err = bolt.Open(filepath.Join(self.dir, "controller.db"), 0700); err != nil {
+		return
+	}
 	if err = termbox.Init(); err != nil {
 		return
 	}
@@ -97,19 +261,11 @@ func (self *Controller) Control(unused struct{}, unused2 *struct{}) (err error) 
 		return
 	}
 	for ev := termbox.PollEvent(); ; ev = termbox.PollEvent() {
-		switch ev.Type {
-		case termbox.EventKey:
-			if ev.Key == termbox.KeyCtrlC {
-				return
-			} else {
-				if err = self.write(ev); err != nil {
-					return
-				}
+		if err = self.handle(ev); err != nil {
+			if _, ok := err.(CtrlC); ok {
+				err = nil
 			}
-		case termbox.EventResize:
-			if err = self.update(); err != nil {
-				return
-			}
+			return
 		}
 	}
 	return

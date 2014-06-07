@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/zond/moxie/consumer"
@@ -23,8 +25,10 @@ var modes = []string{
 }
 
 func main() {
+	defaultDir := filepath.Join(os.Getenv("HOME"), ".moxie")
 	localhost := flag.String("localhost", "localhost:6677", "The local host for the proxy.")
 	remotehost := flag.String("remotehost", "", fmt.Sprintf("Where to connect to. Required for %v mode.", modeProxy))
+	dir := flag.String("dir", defaultDir, "Where to store persistent data like history and logs.")
 	mode := flag.String("mode", modeProxy, fmt.Sprintf("The run mode, one of %v.", modes))
 
 	flag.Parse()
@@ -52,7 +56,7 @@ func main() {
 			panic(err)
 		}
 	case modeControl:
-		controller := controller.New()
+		controller := controller.New().Dir(*dir)
 		if err := controller.Control(struct{}{}, &struct{}{}); err != nil {
 			panic(err)
 		}
