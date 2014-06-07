@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -11,12 +14,23 @@ import (
 
 var history = []byte("history")
 
+const (
+	regular = iota
+	historySearch
+)
+
+const (
+	historySearchHeader = "(reverse-i-search)`"
+)
+
 type Controller struct {
-	cursor      int
-	buffer      []rune
-	dir         string
-	db          *bolt.DB
-	lastHistory []byte
+	cursor        int
+	buffer        []rune
+	dir           string
+	db            *bolt.DB
+	lastHistory   []byte
+	mode          int
+	historySearch []rune
 }
 
 func New() *Controller {
@@ -28,20 +42,40 @@ func (self *Controller) Dir(d string) *Controller {
 	return self
 }
 
-func (self *Controller) update() (err error) {
-	width, height := termbox.Size()
+func (self *Controller) setRunes(r []rune) (err error) {
+	width, _ := termbox.Size()
 	if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
 		return
 	}
-	for index, ch := range self.buffer {
+	for index, ch := range r {
 		x, y := index%width, index/width
 		termbox.SetCell(x, y, ch, termbox.ColorDefault, termbox.ColorDefault)
 	}
-	cursorX, cursorY := self.cursor%width, self.cursor/width
+	return
+}
+
+func (self *Controller) setCursor(i int) {
+	width, height := termbox.Size()
+	cursorX, cursorY := i%width, i/width
 	if cursorY >= height {
 		cursorX, cursorY = width, height
 	}
 	termbox.SetCursor(cursorX, cursorY)
+}
+
+func (self *Controller) update() (err error) {
+	switch self.mode {
+	case regular:
+		if err = self.setRunes(self.buffer); err != nil {
+			return
+		}
+		self.setCursor(self.cursor)
+	case historySearch:
+		if err = self.setRunes([]rune(fmt.Sprintf("%s%s`: %s", historySearchHeader, string(self.buffer), string(self.historySearch)))); err != nil {
+			return
+		}
+		self.setCursor(len(historySearchHeader) + self.cursor)
+	}
 	if err = termbox.Flush(); err != nil {
 		return
 	}
@@ -174,6 +208,60 @@ func (self *Controller) prevHistory(lastHistory []byte) (newHistory, result []by
 	return
 }
 
+func (self *Controller) searchPrevHistory(lastHistory []byte, needle []rune) (newHistory, result []byte, found bool, err error) {
+	tx, err := self.db.Begin(true)
+	if err != nil {
+		return
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+	}()
+	bucket, err := tx.CreateBucketIfNotExists(history)
+	if err != nil {
+		return
+	}
+	cursor := bucket.Cursor()
+	tries := 0
+	if lastHistory == nil {
+		newHistory, result = cursor.Last()
+	} else {
+		if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
+			newHistory, result = cursor.Last()
+		} else {
+			newHistory, result = cursor.Prev()
+			tries = 1
+		}
+	}
+	for (tries > 0 || newHistory != nil) && !strings.Contains(string(result), string(needle)) {
+		newHistory, result = cursor.Prev()
+		if newHistory == nil && tries > 0 {
+			tries -= 1
+			newHistory, result = cursor.Last()
+		}
+	}
+	found = newHistory != nil
+	return
+}
+
+func (self *Controller) updateHistorySearch() (err error) {
+	if len(self.buffer) > 0 {
+		var hist []byte
+		var found bool
+		self.lastHistory, hist, found, err = self.searchPrevHistory(self.lastHistory, self.buffer)
+		if err != nil {
+			return
+		}
+		if found {
+			self.historySearch = []rune(string(hist))
+		}
+	}
+	return
+}
+
 func (self *Controller) handle(ev termbox.Event) (err error) {
 	switch ev.Type {
 	case termbox.EventKey:
@@ -181,6 +269,8 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 			err = CtrlC("QUIT")
 			return
 		} else {
+			before := make([]rune, len(self.buffer))
+			copy(before, self.buffer)
 			width, height := termbox.Size()
 			switch ev.Key {
 			case termbox.KeySpace:
@@ -188,36 +278,54 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 					self.insert(32)
 				}
 			case termbox.KeyEnter:
-				if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
-					return
+				switch self.mode {
+				case regular:
+					if len(self.buffer) > 0 {
+						if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
+							return
+						}
+						if err = self.pushHistory(self.buffer); err != nil {
+							return
+						}
+						self.buffer = nil
+						self.cursor = 0
+						self.lastHistory = nil
+					}
+				case historySearch:
+					self.buffer = self.historySearch
+					self.historySearch = nil
+					self.mode = regular
 				}
-				if err = self.pushHistory(self.buffer); err != nil {
-					return
-				}
-				self.buffer = nil
-				self.cursor = 0
-				self.lastHistory = nil
 			case termbox.KeyArrowDown:
-				var hist []byte
-				var found bool
-				self.lastHistory, hist, found, err = self.nextHistory(self.lastHistory)
-				if err != nil {
-					return
+				if self.mode == regular {
+					var hist []byte
+					var found bool
+					self.lastHistory, hist, found, err = self.nextHistory(self.lastHistory)
+					if err != nil {
+						return
+					}
+					if found {
+						self.buffer = []rune(string(hist))
+						self.cursor = len(self.buffer)
+					}
 				}
-				if found {
-					self.buffer = []rune(string(hist))
-					self.cursor = len(self.buffer)
+			case termbox.KeyCtrlR:
+				self.mode = historySearch
+				if err = self.updateHistorySearch(); err != nil {
+					return
 				}
 			case termbox.KeyArrowUp:
-				var hist []byte
-				var found bool
-				self.lastHistory, hist, found, err = self.prevHistory(self.lastHistory)
-				if err != nil {
-					return
-				}
-				if found {
-					self.buffer = []rune(string(hist))
-					self.cursor = len(self.buffer)
+				if self.mode == regular {
+					var hist []byte
+					var found bool
+					self.lastHistory, hist, found, err = self.prevHistory(self.lastHistory)
+					if err != nil {
+						return
+					}
+					if found {
+						self.buffer = []rune(string(hist))
+						self.cursor = len(self.buffer)
+					}
 				}
 			case termbox.KeyBackspace2:
 				if self.cursor > 0 {
@@ -234,6 +342,12 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 			default:
 				if self.cursor < width*height-1 {
 					self.insert(ev.Ch)
+				}
+			}
+			if self.mode == historySearch && bytes.Compare([]byte(string(self.buffer)), []byte(string(before))) != 0 {
+				self.lastHistory = nil
+				if err = self.updateHistorySearch(); err != nil {
+					return
 				}
 			}
 			if err = self.update(); err != nil {
