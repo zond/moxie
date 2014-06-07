@@ -20,9 +20,10 @@ type Proxy struct {
 
 func New() (result *Proxy) {
 	result = &Proxy{
-		lock:      &sync.RWMutex{},
-		buffer:    make(chan []byte, 2<<16),
-		consumers: map[string]*rpc.Client{},
+		lock:        &sync.RWMutex{},
+		buffer:      make(chan []byte, 2<<16),
+		consumers:   map[string]*rpc.Client{},
+		subscribers: map[string]*rpc.Client{},
 	}
 	result.newConsumerSem = sync.NewCond(result.lock)
 	return
@@ -92,6 +93,13 @@ func (self *Proxy) Transmit(s string, unused *struct{}) (err error) {
 		}
 		toWrite = toWrite[wrote:]
 	}
+	self.lock.Lock()
+	for addr, client := range self.subscribers {
+		if err := client.Call("rpc.Transmit", []byte(s), &struct{}{}); err != nil {
+			delete(self.subscribers, addr)
+		}
+	}
+	self.lock.Unlock()
 	return
 }
 

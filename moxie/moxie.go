@@ -9,6 +9,7 @@ import (
 
 	"github.com/zond/moxie/consumer"
 	"github.com/zond/moxie/controller"
+	"github.com/zond/moxie/logger"
 	"github.com/zond/moxie/proxy"
 )
 
@@ -16,12 +17,14 @@ const (
 	modeConsume = "consume"
 	modeControl = "control"
 	modeProxy   = "proxy"
+	modeLog     = "log"
 )
 
 var modes = []string{
 	modeConsume,
 	modeControl,
 	modeProxy,
+	modeLog,
 }
 
 func main() {
@@ -61,6 +64,15 @@ func main() {
 			panic(err)
 		}
 		if err := controller.Control(struct{}{}, &struct{}{}); err != nil {
+			panic(err)
+		}
+	case modeLog:
+		parts := strings.Split(*localhost, ":")
+		logger := logger.New()
+		if err := logger.Listen(parts[0], &struct{}{}); err != nil {
+			panic(err)
+		}
+		if err := logger.Connect(*localhost, &struct{}{}); err != nil {
 			panic(err)
 		}
 	}
