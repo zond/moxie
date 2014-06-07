@@ -164,8 +164,11 @@ func (self *Controller) prevHistory(lastHistory []byte) (newHistory, result []by
 		if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
 			found = false
 		} else {
-			newHistory, result = cursor.Prev()
-			found = newHistory != nil
+			if newHistory, result = cursor.Prev(); newHistory == nil {
+				newHistory = lastHistory
+			} else {
+				found = true
+			}
 		}
 	}
 	return
