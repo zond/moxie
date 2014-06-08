@@ -2,58 +2,60 @@ package consumer
 
 import (
 	"fmt"
-	"net"
+	"log"
 	"net/rpc"
+
+	"github.com/zond/mdnsrpc"
+	"github.com/zond/moxie/common"
 )
 
 type Consumer struct {
-	listener *net.TCPListener
-	server   *rpc.Server
-	client   *rpc.Client
-	done     chan struct{}
+	client *rpc.Client
+	stream chan []byte
 }
 
 func New() *Consumer {
 	return &Consumer{
-		done: make(chan struct{}),
+		stream: make(chan []byte),
 	}
 }
 
-func (self *Consumer) Listen(hostname string, unused *struct{}) (err error) {
-	tcpAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%v:0", hostname))
+func (self *Consumer) Publish(unused struct{}, unused2 *struct{}) (err error) {
+	_, err = mdnsrpc.Publish(common.Consumer, self)
 	if err != nil {
 		return
 	}
-
-	if self.listener, err = net.ListenTCP("tcp", tcpAddr); err != nil {
+	if err = self.receive(); err != nil {
 		return
 	}
+	return
+}
 
-	self.server = rpc.NewServer()
-	self.server.RegisterName("rpc", self)
-	go func() {
-		self.server.Accept(self.listener)
-		close(self.done)
-	}()
+func (self *Consumer) Log(s string, unused *struct{}) (err error) {
+	loggers, err := mdnsrpc.LookupAll(common.Subscriber)
+	if err != nil {
+		return
+	}
+	if len(loggers) == 0 {
+		log.Printf("%v", err.Error())
+	} else {
+		for _, client := range loggers {
+			if err := client.Call("rpc.Log", s, nil); err != nil {
+				log.Printf("%v", err.Error())
+			}
+		}
+	}
+	return
+}
 
+func (self *Consumer) receive() (err error) {
+	for b := range self.stream {
+		fmt.Print(string(b))
+	}
 	return
 }
 
 func (self *Consumer) Consume(b []byte, unused *struct{}) (err error) {
-	fmt.Printf("%s", b)
-	return
-}
-
-func (self *Consumer) Connect(addr string, unused *struct{}) (err error) {
-	if self.client, err = rpc.Dial("tcp", addr); err != nil {
-		return
-	}
-
-	if err = self.client.Call("rpc.Consume", self.listener.Addr().String(), &struct{}{}); err != nil {
-		return
-	}
-
-	<-self.done
-
+	self.stream <- b
 	return
 }

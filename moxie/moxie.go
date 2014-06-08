@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/zond/moxie/consumer"
 	"github.com/zond/moxie/controller"
@@ -29,7 +28,6 @@ var modes = []string{
 
 func main() {
 	defaultDir := filepath.Join(os.Getenv("HOME"), ".moxie")
-	localhost := flag.String("localhost", "localhost:6677", "The local host for the proxy.")
 	remotehost := flag.String("remotehost", "", fmt.Sprintf("Where to connect to. Required for %v mode.", modeProxy))
 	dir := flag.String("dir", defaultDir, "Where to store persistent data like history and logs.")
 	mode := flag.String("mode", modeProxy, fmt.Sprintf("The run mode, one of %v.", modes))
@@ -43,37 +41,26 @@ func main() {
 			return
 		}
 		proxy := proxy.New()
-		if err := proxy.Connect(*remotehost, &struct{}{}); err != nil {
+		if err := proxy.Connect(*remotehost, nil); err != nil {
 			panic(err)
 		}
-		if err := proxy.Listen(*localhost, &struct{}{}); err != nil {
+		if err := proxy.Publish(struct{}{}, nil); err != nil {
 			panic(err)
 		}
 	case modeConsume:
-		parts := strings.Split(*localhost, ":")
 		consumer := consumer.New()
-		if err := consumer.Listen(parts[0], &struct{}{}); err != nil {
-			panic(err)
-		}
-		if err := consumer.Connect(*localhost, &struct{}{}); err != nil {
+		if err := consumer.Publish(struct{}{}, nil); err != nil {
 			panic(err)
 		}
 	case modeControl:
 		controller := controller.New().Dir(*dir)
-		if err := controller.Connect(*localhost, &struct{}{}); err != nil {
-			panic(err)
-		}
-		if err := controller.Control(struct{}{}, &struct{}{}); err != nil {
+		if err := controller.Control(struct{}{}, nil); err != nil {
 			panic(err)
 		}
 	case modeLog:
-		parts := strings.Split(*localhost, ":")
 		logger := logger.New()
-		if err := logger.Listen(parts[0], &struct{}{}); err != nil {
-			panic(err)
-		}
-		if err := logger.Connect(*localhost, &struct{}{}); err != nil {
-			panic(err)
+		if err := logger.Publish(struct{}{}, nil); err != nil {
+			return
 		}
 	}
 
