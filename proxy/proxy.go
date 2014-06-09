@@ -59,7 +59,6 @@ func (self *Proxy) consume() {
 			if err != nil {
 				if _, ok := err.(mdnsrpc.NoSuchService); !ok {
 					self.Log(err.Error(), nil)
-					return
 				}
 			}
 			time.Sleep(time.Second / 2)
@@ -75,7 +74,6 @@ func (self *Proxy) consume() {
 				err = nil
 			} else {
 				self.Log(err.Error(), nil)
-				return
 			}
 		}
 		for _, client := range subscribers {
