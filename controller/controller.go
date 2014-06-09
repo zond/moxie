@@ -17,6 +17,7 @@ import (
 )
 
 var history = []byte("history")
+var splitReg = regexp.MustCompile("\\W+")
 
 const (
 	regular = iota
@@ -47,8 +48,33 @@ func (self *Controller) Dir(d string) *Controller {
 	return self
 }
 
+func (self *Controller) Publish(unused struct{}, unused2 *struct{}) (err error) {
+	_, err = mdnsrpc.Publish(common.Subscriber, self)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func (self *Controller) SubscriberTransmit(b []byte, unused *struct{}) (err error) {
+	return
+}
+
+func (self *Controller) SubscriberReceive(b []byte, unused *struct{}) (err error) {
+	for _, part := range splitReg.Split(string(b), -1) {
+		self.rememberCompletion(part)
+	}
+	return
+}
+
+func (self *Controller) SubscriberLog(s string, unused *struct{}) (err error) {
+	return
+}
+
 func (self *Controller) rememberCompletion(s string) {
-	self.completeTree = self.completeTree.Insert([]byte(s))
+	if len(s) > 3 {
+		self.completeTree = self.completeTree.Insert([]byte(s))
+	}
 }
 
 func (self *Controller) Log(s string, unused *struct{}) (err error) {
@@ -60,8 +86,7 @@ func (self *Controller) Log(s string, unused *struct{}) (err error) {
 		log.Printf("%v", err.Error())
 	} else {
 		for _, client := range loggers {
-			fmt.Println("logging", s)
-			if err := client.Call("Log", s, nil); err != nil {
+			if err := client.Call(common.SubscriberLog, s, nil); err != nil {
 				log.Printf("%v", err.Error())
 			}
 		}
@@ -289,8 +314,6 @@ func (self *Controller) updateHistorySearch() (err error) {
 	return
 }
 
-var splitReg = regexp.MustCompile("\\s+")
-
 func (self *Controller) handle(ev termbox.Event) (err error) {
 	switch ev.Type {
 	case termbox.EventKey:
@@ -314,7 +337,7 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 						if client, err = mdnsrpc.LookupOne(common.Proxy); err != nil {
 							return
 						}
-						if err = client.Call("Transmit", string(self.buffer)+"\n", nil); err != nil {
+						if err = client.Call(common.ProxyTransmit, string(self.buffer)+"\n", nil); err != nil {
 							return
 						}
 						if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
