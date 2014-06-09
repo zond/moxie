@@ -54,6 +54,9 @@ func main() {
 		}
 	case modeControl:
 		controller := controller.New().Dir(*dir)
+		if err := controller.Publish(struct{}{}, nil); err != nil {
+			panic(err)
+		}
 		if err := controller.Control(struct{}{}, nil); err != nil {
 			panic(err)
 		}
