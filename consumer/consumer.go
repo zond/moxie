@@ -69,7 +69,7 @@ func (self *Consumer) checkInterrupts(buf *bytes.Buffer) {
 				self.Log(err.Error(), nil)
 				delete(self.interrupts, name)
 			} else {
-				if err := client.Call("Interrupt", common.InterruptedConsumption{
+				if err := client.Call(common.InterruptorInterrupt, common.InterruptedConsumption{
 					Name:    name,
 					Content: content,
 				}, nil); err != nil {
@@ -85,7 +85,7 @@ func (self *Consumer) checkInterrupts(buf *bytes.Buffer) {
 	}
 }
 
-func (self *Consumer) InterruptConsumption(interrupt common.ConsumptionInterrupt, unused *struct{}) (err error) {
+func (self *Consumer) ConsumerInterruptConsumption(interrupt common.ConsumptionInterrupt, unused *struct{}) (err error) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 	self.interrupts[interrupt.Name] = interrupt
@@ -115,7 +115,7 @@ func (self *Consumer) receive() (err error) {
 	return
 }
 
-func (self *Consumer) Consume(b []byte, unused *struct{}) (err error) {
+func (self *Consumer) ConsumerConsume(b []byte, unused *struct{}) (err error) {
 	self.stream <- b
 	return
 }
