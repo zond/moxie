@@ -63,7 +63,7 @@ func InterruptConsumption(name, pattern string, interrupt func(string)) (err err
 		Addr:    fmt.Sprintf("%v:%v", handler.addr.IP.String(), handler.addr.Port),
 	}
 	for _, client := range consumers {
-		if err = client.Call("InterruptConsumption", interruptRequest, nil); err != nil {
+		if err = client.Call(common.ConsumerInterruptConsumption, interruptRequest, nil); err != nil {
 			return
 		}
 	}
