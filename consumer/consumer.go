@@ -47,7 +47,7 @@ func (self *Consumer) Log(s string, unused *struct{}) (err error) {
 		log.Printf("%v", err.Error())
 	} else {
 		for _, client := range loggers {
-			if err := client.Call("Log", s, nil); err != nil {
+			if err := client.Call(common.SubscriberLog, s, nil); err != nil {
 				log.Printf("%v", err.Error())
 			}
 		}
@@ -88,6 +88,9 @@ func (self *Consumer) checkInterrupts(buf *bytes.Buffer) {
 func (self *Consumer) ConsumerInterruptConsumption(interrupt common.ConsumptionInterrupt, unused *struct{}) (err error) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
+	if _, err = interrupt.Compiled(); err != nil {
+		return
+	}
 	self.interrupts[interrupt.Name] = interrupt
 	return
 }
