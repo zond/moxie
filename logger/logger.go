@@ -2,7 +2,6 @@ package logger
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"log"
 
@@ -57,6 +56,6 @@ func (self *Logger) SubscriberReceive(b []byte, unused *struct{}) (err error) {
 }
 
 func (self *Logger) SubscriberLog(s string, unused *struct{}) (err error) {
-	fmt.Printf("LOG\t%s\n", s)
+	log.Printf("LOG\t%s\n", s)
 	return
 }
