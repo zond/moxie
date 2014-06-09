@@ -170,25 +170,16 @@ func (self *Controller) timeToBytes(t time.Time) (result []byte) {
 }
 
 func (self *Controller) pushHistory(b []rune) (err error) {
-	tx, err := self.db.Begin(true)
-	if err != nil {
-		return
-	}
-	defer func() {
+	return self.db.Update(func(tx *bolt.Tx) (err error) {
+		bucket, err := tx.CreateBucketIfNotExists(history)
 		if err != nil {
-			tx.Rollback()
-		} else {
-			err = tx.Commit()
+			return
 		}
-	}()
-	bucket, err := tx.CreateBucketIfNotExists(history)
-	if err != nil {
+		if err = bucket.Put(self.timeToBytes(time.Now()), []byte(string(b))); err != nil {
+			return
+		}
 		return
-	}
-	if err = bucket.Put(self.timeToBytes(time.Now()), []byte(string(b))); err != nil {
-		return
-	}
-	return
+	})
 }
 
 type CtrlC string
@@ -201,101 +192,77 @@ func (self *Controller) nextHistory(lastHistory []byte) (newHistory, result []by
 	if lastHistory == nil {
 		return
 	}
-	tx, err := self.db.Begin(true)
-	if err != nil {
-		return
-	}
-	defer func() {
+	err = self.db.Update(func(tx *bolt.Tx) (err error) {
+		bucket, err := tx.CreateBucketIfNotExists(history)
 		if err != nil {
-			tx.Rollback()
-		} else {
-			err = tx.Commit()
+			return
 		}
-	}()
-	bucket, err := tx.CreateBucketIfNotExists(history)
-	if err != nil {
+		cursor := bucket.Cursor()
+		if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
+			found = false
+		} else {
+			newHistory, result = cursor.Next()
+			found = true
+		}
 		return
-	}
-	cursor := bucket.Cursor()
-	if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
-		found = false
-	} else {
-		newHistory, result = cursor.Next()
-		found = true
-	}
+	})
 	return
 }
 
 func (self *Controller) prevHistory(lastHistory []byte) (newHistory, result []byte, found bool, err error) {
-	tx, err := self.db.Begin(true)
-	if err != nil {
-		return
-	}
-	defer func() {
+	err = self.db.Update(func(tx *bolt.Tx) (err error) {
+		bucket, err := tx.CreateBucketIfNotExists(history)
 		if err != nil {
-			tx.Rollback()
-		} else {
-			err = tx.Commit()
+			return
 		}
-	}()
-	bucket, err := tx.CreateBucketIfNotExists(history)
-	if err != nil {
-		return
-	}
-	cursor := bucket.Cursor()
-	if lastHistory == nil {
-		newHistory, result = cursor.Last()
-		found = newHistory != nil
-	} else {
-		if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
-			found = false
+		cursor := bucket.Cursor()
+		if lastHistory == nil {
+			newHistory, result = cursor.Last()
+			found = newHistory != nil
 		} else {
-			if newHistory, result = cursor.Prev(); newHistory == nil {
-				newHistory = lastHistory
+			if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
+				found = false
 			} else {
-				found = true
+				if newHistory, result = cursor.Prev(); newHistory == nil {
+					newHistory = lastHistory
+				} else {
+					found = true
+				}
 			}
 		}
-	}
+		return
+	})
 	return
 }
 
 func (self *Controller) searchPrevHistory(lastHistory []byte, needle []rune) (newHistory, result []byte, found bool, err error) {
-	tx, err := self.db.Begin(true)
-	if err != nil {
-		return
-	}
-	defer func() {
+	err = self.db.Update(func(tx *bolt.Tx) (err error) {
+		bucket, err := tx.CreateBucketIfNotExists(history)
 		if err != nil {
-			tx.Rollback()
-		} else {
-			err = tx.Commit()
+			return
 		}
-	}()
-	bucket, err := tx.CreateBucketIfNotExists(history)
-	if err != nil {
-		return
-	}
-	cursor := bucket.Cursor()
-	tries := 0
-	if lastHistory == nil {
-		newHistory, result = cursor.Last()
-	} else {
-		if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
+		cursor := bucket.Cursor()
+		tries := 0
+		if lastHistory == nil {
 			newHistory, result = cursor.Last()
 		} else {
+			if checkOld, _ := cursor.Seek(lastHistory); checkOld == nil {
+				newHistory, result = cursor.Last()
+			} else {
+				newHistory, result = cursor.Prev()
+				tries = 1
+			}
+		}
+		for (tries > 0 || newHistory != nil) && !strings.Contains(string(result), string(needle)) {
 			newHistory, result = cursor.Prev()
-			tries = 1
+			if newHistory == nil && tries > 0 {
+				tries -= 1
+				newHistory, result = cursor.Last()
+			}
 		}
-	}
-	for (tries > 0 || newHistory != nil) && !strings.Contains(string(result), string(needle)) {
-		newHistory, result = cursor.Prev()
-		if newHistory == nil && tries > 0 {
-			tries -= 1
-			newHistory, result = cursor.Last()
-		}
-	}
-	found = newHistory != nil
+		found = newHistory != nil
+		return
+	})
 	return
 }
 
