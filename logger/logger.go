@@ -46,17 +46,17 @@ func (self *Logger) Publish(unused struct{}, unused2 *struct{}) (err error) {
 	return
 }
 
-func (self *Logger) Transmit(b []byte, unused *struct{}) (err error) {
+func (self *Logger) SubscriberTransmit(b []byte, unused *struct{}) (err error) {
 	_, err = self.transmitWriter.Write(b)
 	return
 }
 
-func (self *Logger) Receive(b []byte, unused *struct{}) (err error) {
+func (self *Logger) SubscriberReceive(b []byte, unused *struct{}) (err error) {
 	_, err = self.receiveWriter.Write(b)
 	return
 }
 
-func (self *Logger) Log(s string, unused *struct{}) (err error) {
+func (self *Logger) SubscriberLog(s string, unused *struct{}) (err error) {
 	fmt.Printf("LOG\t%s\n", s)
 	return
 }
