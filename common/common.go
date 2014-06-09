@@ -36,7 +36,9 @@ type ConsumptionInterrupt struct {
 
 func (self *ConsumptionInterrupt) Compiled() (result *regexp.Regexp, err error) {
 	if self.compiled == nil {
-		self.compiled, err = regexp.Compile("(?ms)(?P<BEFORE>.*?)(?P<CONTENT>" + self.Pattern + ")(?P<AFTER>.*)")
+		if self.compiled, err = regexp.Compile("(?ms)(?P<BEFORE>.*?)(?P<CONTENT>" + self.Pattern + ")(?P<AFTER>.*)"); err != nil {
+			return
+		}
 		for index, name := range self.compiled.SubexpNames() {
 			switch name {
 			case "BEFORE":
