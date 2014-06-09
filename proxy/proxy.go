@@ -43,7 +43,7 @@ func (self *Proxy) Log(s string, unused *struct{}) (err error) {
 		return
 	}
 	for _, client := range loggers {
-		if err := client.Call("Log", s, nil); err != nil {
+		if err := client.Call(common.SubscriberLog, s, nil); err != nil {
 			log.Printf(err.Error())
 		}
 	}
@@ -65,7 +65,7 @@ func (self *Proxy) consume() {
 			time.Sleep(time.Second / 2)
 		}
 		for _, client := range consumers {
-			if err := client.Call("Consume", b, nil); err != nil {
+			if err := client.Call(common.ConsumerConsume, b, nil); err != nil {
 				self.Log(err.Error(), nil)
 			}
 		}
@@ -79,7 +79,7 @@ func (self *Proxy) consume() {
 			}
 		}
 		for _, client := range subscribers {
-			if err := client.Call("Receive", b, nil); err != nil {
+			if err := client.Call(common.SubscriberReceive, b, nil); err != nil {
 				self.Log(err.Error(), nil)
 			}
 		}
@@ -110,7 +110,7 @@ func (self *Proxy) Connect(addr string, unused *struct{}) (err error) {
 	return
 }
 
-func (self *Proxy) Transmit(s string, unused *struct{}) (err error) {
+func (self *Proxy) ProxyTransmit(s string, unused *struct{}) (err error) {
 	toWrite := []byte(s)
 	wrote := 0
 	for len(toWrite) > 0 {
@@ -129,7 +129,7 @@ func (self *Proxy) Transmit(s string, unused *struct{}) (err error) {
 			}
 		}
 		for _, client := range subscribers {
-			if err := client.Call("Transmit", []byte(s), nil); err != nil {
+			if err := client.Call(common.SubscriberTransmit, []byte(s), nil); err != nil {
 				self.Log(err.Error(), nil)
 			}
 		}
