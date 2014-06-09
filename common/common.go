@@ -7,9 +7,16 @@ import (
 )
 
 const (
-	Proxy      = "moxie_Proxy"
-	Consumer   = "moxie_Consumer"
-	Subscriber = "moxie_Subscriber"
+	Proxy                        = "moxie_Proxy"
+	Consumer                     = "moxie_Consumer"
+	Subscriber                   = "moxie_Subscriber"
+	ProxyTransmit                = "ProxyTransmit"
+	SubscriberTransmit           = "SubscriberTransmit"
+	SubscriberReceive            = "SubscriberReceive"
+	SubscriberLog                = "SubscriberLog"
+	ConsumerConsume              = "ConsumerConsume"
+	ConsumerInterruptConsumption = "ConsumerInterruptConsumption"
+	InterruptorInterrupt         = "InterruptorInterrupt"
 )
 
 type InterruptedConsumption struct {
