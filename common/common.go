@@ -1,7 +1,8 @@
 package common
 
 import (
-	"net/rpc"
+	"bytes"
+	"fmt"
 	"regexp"
 )
 
@@ -11,12 +12,16 @@ const (
 	Subscriber = "moxie_Subscriber"
 )
 
+type InterruptedConsumption struct {
+	Name    string
+	Content string
+}
+
 type ConsumptionInterrupt struct {
 	Name         string
 	Addr         string
 	Pattern      string
 	compiled     *regexp.Regexp
-	client       *rpc.Client
 	beforeGroup  int
 	contentGroup int
 	afterGroup   int
@@ -51,10 +56,93 @@ func (self *ConsumptionInterrupt) FindMatch(s string) (before, content, after st
 	return
 }
 
-func (self *ConsumptionInterrupt) Client() (result *rpc.Client, err error) {
-	if self.client == nil {
-		self.client, err = rpc.Dial("tcp", self.Addr)
+type CompleteNode struct {
+	terminates bool
+	char       byte
+	children   []*CompleteNode
+}
+
+func (self *CompleteNode) stringify(indent string, buf *bytes.Buffer) {
+	anyChild := false
+	firstChild := true
+	for _, child := range self.children {
+		if child != nil {
+			anyChild = true
+			if firstChild {
+				firstChild = false
+				fmt.Fprintf(buf, "%v", string([]byte{child.char}))
+			} else {
+				fmt.Fprintf(buf, "%v%v", indent, string([]byte{child.char}))
+			}
+			if child.terminates {
+				fmt.Fprintf(buf, ".")
+			}
+			child.stringify(indent+" ", buf)
+		}
 	}
-	result = self.client
+	if !anyChild {
+		fmt.Fprintf(buf, "\n")
+	}
+}
+
+func (self *CompleteNode) String() string {
+	buf := bytes.NewBuffer(nil)
+	self.stringify("", buf)
+	return buf.String()
+}
+
+func (self *CompleteNode) Insert(b []byte) (result *CompleteNode) {
+	if self == nil {
+		self = &CompleteNode{
+			children: make([]*CompleteNode, 2<<8),
+		}
+	}
+	result = self
+	if len(b) == 0 {
+		self.terminates = true
+		result = self
+		return
+	}
+	if self.children[int(b[0])] == nil {
+		newNode := &CompleteNode{
+			children: make([]*CompleteNode, 2<<8),
+			char:     b[0],
+		}
+		self.children[int(b[0])] = newNode.Insert(b[1:])
+	} else {
+		self.children[int(b[0])] = self.children[int(b[0])].Insert(b[1:])
+	}
 	return
+}
+
+func (self *CompleteNode) completeHelper(toTraverse, traversed []byte) (result []byte, found bool) {
+	if len(toTraverse) == 0 {
+		if self.terminates {
+			result = traversed
+			found = true
+			return
+		}
+		nonNilChildren := []*CompleteNode{}
+		for _, child := range self.children {
+			if child != nil {
+				nonNilChildren = append(nonNilChildren, child)
+			}
+		}
+		if len(nonNilChildren) == 1 {
+			return nonNilChildren[0].completeHelper(toTraverse, append(traversed, nonNilChildren[0].char))
+		}
+		if len(nonNilChildren) == 0 {
+			result = traversed
+			found = true
+		}
+		return
+	}
+	if self.children[int(toTraverse[0])] == nil {
+		return
+	}
+	return self.children[int(toTraverse[0])].completeHelper(toTraverse[1:], append(traversed, toTraverse[0]))
+}
+
+func (self *CompleteNode) Complete(b []byte) (result []byte, found bool) {
+	return self.completeHelper(b, nil)
 }

@@ -3,8 +3,10 @@ package controller
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -33,6 +35,7 @@ type Controller struct {
 	lastHistory   []byte
 	mode          int
 	historySearch []rune
+	completeTree  *common.CompleteNode
 }
 
 func New() *Controller {
@@ -42,6 +45,28 @@ func New() *Controller {
 func (self *Controller) Dir(d string) *Controller {
 	self.dir = d
 	return self
+}
+
+func (self *Controller) rememberCompletion(s string) {
+	self.completeTree = self.completeTree.Insert([]byte(s))
+}
+
+func (self *Controller) Log(s string, unused *struct{}) (err error) {
+	loggers, err := mdnsrpc.LookupAll(common.Subscriber)
+	if err != nil {
+		return
+	}
+	if len(loggers) == 0 {
+		log.Printf("%v", err.Error())
+	} else {
+		for _, client := range loggers {
+			fmt.Println("logging", s)
+			if err := client.Call("Log", s, nil); err != nil {
+				log.Printf("%v", err.Error())
+			}
+		}
+	}
+	return
 }
 
 func (self *Controller) setRunes(r []rune) (err error) {
@@ -264,6 +289,8 @@ func (self *Controller) updateHistorySearch() (err error) {
 	return
 }
 
+var splitReg = regexp.MustCompile("\\s+")
+
 func (self *Controller) handle(ev termbox.Event) (err error) {
 	switch ev.Type {
 	case termbox.EventKey:
@@ -287,7 +314,7 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 						if client, err = mdnsrpc.LookupOne(common.Proxy); err != nil {
 							return
 						}
-						if err = client.Call("rpc.Transmit", string(self.buffer)+"\n", nil); err != nil {
+						if err = client.Call("Transmit", string(self.buffer)+"\n", nil); err != nil {
 							return
 						}
 						if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
@@ -295,6 +322,9 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 						}
 						if err = self.pushHistory(self.buffer); err != nil {
 							return
+						}
+						for _, part := range splitReg.Split(string(self.buffer), -1) {
+							self.rememberCompletion(part)
 						}
 						self.buffer = nil
 						self.cursor = 0
@@ -304,6 +334,12 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 					self.buffer = self.historySearch
 					self.historySearch = nil
 					self.mode = regular
+				}
+			case termbox.KeyTab:
+				completed, found := self.completeTree.Complete([]byte(string(self.buffer)))
+				if found {
+					self.buffer = []rune(string(completed))
+					self.cursor = len(self.buffer)
 				}
 			case termbox.KeyArrowDown:
 				if self.mode == regular {
@@ -382,7 +418,11 @@ func (self *Controller) Control(unused struct{}, unused2 *struct{}) (err error) 
 	if err = termbox.Init(); err != nil {
 		return
 	}
-	defer termbox.Close()
+	defer func() {
+		if e := recover(); e == nil && err == nil {
+			termbox.Close()
+		}
+	}()
 	if err = self.update(); err != nil {
 		return
 	}
