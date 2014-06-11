@@ -82,11 +82,9 @@ func (self *Consumer) checkInterrupts(buf *bytes.Buffer) {
 							delete(self.interrupts, name)
 						}
 					}
-					self.Log(fmt.Sprintf("buffer before: %#v", buf.String()), nil)
 					buf.Reset()
 					buf.WriteString(before)
 					buf.WriteString(after)
-					self.Log(fmt.Sprintf("buffer after: %#v", buf.String()), nil)
 				}
 			}
 		}
