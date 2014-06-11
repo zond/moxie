@@ -2,6 +2,7 @@ package scripting
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"sync"
 
@@ -49,23 +50,52 @@ var handler = interruptHandler{
 	interrupts: map[string]func(string){},
 }
 
-func InterruptConsumption(name, pattern string, interrupt func(string)) (err error) {
+func interruptConsumption(interrupt common.ConsumptionInterrupt, h func(string)) (err error) {
 	consumers, err := mdnsrpc.LookupAll(common.Consumer)
 	if err != nil {
 		return
 	}
-	if err = handler.register(name, interrupt); err != nil {
+	if err = handler.register(interrupt.Name, h); err != nil {
 		return
 	}
-	interruptRequest := common.ConsumptionInterrupt{
-		Name:    name,
-		Pattern: pattern,
-		Addr:    fmt.Sprintf("%v:%v", handler.addr.IP.String(), handler.addr.Port),
-	}
+	interrupt.Addr = fmt.Sprintf("%v:%v", handler.addr.IP.String(), handler.addr.Port)
 	for _, client := range consumers {
-		if err = client.Call(common.ConsumerInterruptConsumption, interruptRequest, nil); err != nil {
+		if err = client.Call(common.ConsumerInterruptConsumption, interrupt, nil); err != nil {
 			return
 		}
+	}
+	return
+}
+
+func InterruptConsumption(name, pattern string, handler func(string)) (err error) {
+	return interruptConsumption(common.ConsumptionInterrupt{
+		Name:    name,
+		Pattern: pattern,
+	}, handler)
+}
+
+func TransmitAndInterruptN(n int, trans string, pattern string, h func(string)) (err error) {
+	if err = interruptConsumption(common.ConsumptionInterrupt{
+		Name:    fmt.Sprint(rand.Int63()),
+		Pattern: pattern,
+		Times:   n,
+	}, h); err != nil {
+		return
+	}
+	return Transmit(trans)
+}
+
+func TransmitAndInterruptOnce(trans string, pattern string, h func(string)) (err error) {
+	return TransmitAndInterruptN(1, trans, pattern, h)
+}
+
+func Transmit(s string) (err error) {
+	client, err := mdnsrpc.LookupOne(common.Proxy)
+	if err != nil {
+		return
+	}
+	if err = client.Call(common.ProxyTransmit, s+"\n", nil); err != nil {
+		return
 	}
 	return
 }

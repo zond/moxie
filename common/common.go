@@ -28,6 +28,7 @@ type ConsumptionInterrupt struct {
 	Name         string
 	Addr         string
 	Pattern      string
+	Times        int
 	compiled     *regexp.Regexp
 	beforeGroup  int
 	contentGroup int

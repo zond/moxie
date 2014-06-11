@@ -15,14 +15,14 @@ import (
 type Consumer struct {
 	client     *rpc.Client
 	stream     chan []byte
-	interrupts map[string]common.ConsumptionInterrupt
+	interrupts map[string]*common.ConsumptionInterrupt
 	lock       *sync.RWMutex
 }
 
 func New() *Consumer {
 	return &Consumer{
 		stream:     make(chan []byte),
-		interrupts: map[string]common.ConsumptionInterrupt{},
+		interrupts: map[string]*common.ConsumptionInterrupt{},
 		lock:       &sync.RWMutex{},
 	}
 }
@@ -76,9 +76,17 @@ func (self *Consumer) checkInterrupts(buf *bytes.Buffer) {
 					self.Log(err.Error(), nil)
 					delete(self.interrupts, name)
 				} else {
+					if interrupt.Times != 0 {
+						interrupt.Times -= 1
+						if interrupt.Times == 0 {
+							delete(self.interrupts, name)
+						}
+					}
+					self.Log(fmt.Sprintf("buffer before: %#v", buf.String()), nil)
 					buf.Reset()
 					buf.WriteString(before)
 					buf.WriteString(after)
+					self.Log(fmt.Sprintf("buffer after: %#v", buf.String()), nil)
 				}
 			}
 		}
@@ -91,7 +99,7 @@ func (self *Consumer) ConsumerInterruptConsumption(interrupt common.ConsumptionI
 	if _, err = interrupt.Compiled(); err != nil {
 		return
 	}
-	self.interrupts[interrupt.Name] = interrupt
+	self.interrupts[interrupt.Name] = &interrupt
 	return
 }
 
@@ -106,7 +114,7 @@ func (self *Consumer) receive() (err error) {
 				if _, err = buf.Write(b); err != nil {
 					return
 				}
-			case <-time.After(time.Second / 10):
+			case <-time.After(time.Second / 2):
 				timedOut = true
 			}
 		}
