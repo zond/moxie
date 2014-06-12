@@ -112,7 +112,7 @@ func (self *Consumer) receive() (err error) {
 				if _, err = buf.Write(b); err != nil {
 					return
 				}
-			case <-time.After(time.Second / 2):
+			case <-time.After(time.Second / 10):
 				timedOut = true
 			}
 		}
