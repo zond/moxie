@@ -21,6 +21,12 @@ type interruptHandler struct {
 	addr       *net.TCPAddr
 }
 
+func Must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
 func (self *interruptHandler) InterruptorInterrupt(interrupt common.InterruptedConsumption, unused *struct{}) (err error) {
 	self.lock.RLock()
 	defer self.lock.RUnlock()
