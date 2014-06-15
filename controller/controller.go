@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -37,10 +38,15 @@ type Controller struct {
 	mode          int
 	historySearch []rune
 	completeTree  *common.CompleteNode
+	interrupts    map[string]*common.TransmissionInterrupt
+	lock          *sync.RWMutex
 }
 
 func New() *Controller {
-	return &Controller{}
+	return &Controller{
+		interrupts: map[string]*common.TransmissionInterrupt{},
+		lock:       &sync.RWMutex{},
+	}
 }
 
 func (self *Controller) Dir(d string) *Controller {
@@ -53,6 +59,20 @@ func (self *Controller) Publish(unused struct{}, unused2 *struct{}) (err error) 
 	if err != nil {
 		return
 	}
+	_, err = mdnsrpc.Publish(common.Controller, self)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func (self *Controller) ControllerInterruptTransmission(interrupt common.TransmissionInterrupt, unused *struct{}) (err error) {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+	if _, err = interrupt.Compiled(); err != nil {
+		return
+	}
+	self.interrupts[interrupt.Name] = &interrupt
 	return
 }
 
@@ -300,12 +320,46 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 				switch self.mode {
 				case regular:
 					if len(self.buffer) > 0 {
-						var client *mdnsrpc.Client
-						if client, err = mdnsrpc.LookupOne(common.Proxy); err != nil {
-							return
-						}
-						if err = client.Call(common.ProxyTransmit, string(self.buffer)+"\n", nil); err != nil {
-							return
+						str := string(self.buffer)
+						interrupted := false
+						self.lock.Lock()
+						func() {
+							defer self.lock.Unlock()
+							for name, interrupt := range self.interrupts {
+								var compiled *regexp.Regexp
+								compiled, err = interrupt.Compiled()
+								if err != nil {
+									self.Log(err.Error(), nil)
+									delete(self.interrupts, name)
+								} else {
+									if match := compiled.FindStringSubmatch(str); match != nil {
+										client, err := mdnsrpc.Connect(interrupt.Addr)
+										if err != nil {
+											self.Log(err.Error(), nil)
+											delete(self.interrupts, name)
+										} else {
+											if err := client.Call(common.InterruptorInterruptedTransmission, common.InterruptedTransmission{
+												Name:  name,
+												Match: match,
+											}, nil); err != nil {
+												self.Log(err.Error(), nil)
+												delete(self.interrupts, name)
+											} else {
+												interrupted = true
+											}
+										}
+									}
+								}
+							}
+						}()
+						if !interrupted {
+							var client *mdnsrpc.Client
+							if client, err = mdnsrpc.LookupOne(common.Proxy); err != nil {
+								return
+							}
+							if err = client.Call(common.ProxyTransmit, string(self.buffer)+"\n", nil); err != nil {
+								return
+							}
 						}
 						if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
 							return

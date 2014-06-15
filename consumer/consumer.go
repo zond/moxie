@@ -69,7 +69,7 @@ func (self *Consumer) checkInterrupts(buf *bytes.Buffer) {
 				self.Log(err.Error(), nil)
 				delete(self.interrupts, name)
 			} else {
-				if err := client.Call(common.InterruptorInterrupt, common.InterruptedConsumption{
+				if err := client.Call(common.InterruptorInterruptedConsumption, common.InterruptedConsumption{
 					Name:    name,
 					Content: content,
 				}, nil); err != nil {

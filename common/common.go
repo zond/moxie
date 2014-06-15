@@ -7,17 +7,42 @@ import (
 )
 
 const (
-	Proxy                        = "moxie_Proxy"
-	Consumer                     = "moxie_Consumer"
-	Subscriber                   = "moxie_Subscriber"
-	ProxyTransmit                = "ProxyTransmit"
-	SubscriberTransmit           = "SubscriberTransmit"
-	SubscriberReceive            = "SubscriberReceive"
-	SubscriberLog                = "SubscriberLog"
-	ConsumerConsume              = "ConsumerConsume"
-	ConsumerInterruptConsumption = "ConsumerInterruptConsumption"
-	InterruptorInterrupt         = "InterruptorInterrupt"
+	Proxy                              = "moxie_Proxy"
+	Consumer                           = "moxie_Consumer"
+	Subscriber                         = "moxie_Subscriber"
+	ProxyTransmit                      = "ProxyTransmit"
+	Controller                         = "moxie_Controller"
+	SubscriberTransmit                 = "SubscriberTransmit"
+	SubscriberReceive                  = "SubscriberReceive"
+	SubscriberLog                      = "SubscriberLog"
+	ConsumerConsume                    = "ConsumerConsume"
+	ConsumerInterruptConsumption       = "ConsumerInterruptConsumption"
+	InterruptorInterruptedConsumption  = "InterruptorInterruptedConsumption"
+	InterruptorInterruptedTransmission = "InterruptorInterruptedTransmission"
+	ControllerInterruptTransmission    = "ControllerInterruptTransmission"
 )
+
+type InterruptedTransmission struct {
+	Name  string
+	Match []string
+}
+
+type TransmissionInterrupt struct {
+	Name     string
+	Addr     string
+	Pattern  string
+	compiled *regexp.Regexp
+}
+
+func (self *TransmissionInterrupt) Compiled() (result *regexp.Regexp, err error) {
+	if self.compiled == nil {
+		if self.compiled, err = regexp.Compile(self.Pattern); err != nil {
+			return
+		}
+	}
+	result = self.compiled
+	return
+}
 
 type InterruptedConsumption struct {
 	Name    string

@@ -16,9 +16,10 @@ func Wait() {
 }
 
 type interruptHandler struct {
-	lock       *sync.RWMutex
-	interrupts map[string]func(string)
-	addr       *net.TCPAddr
+	lock                   *sync.RWMutex
+	consumptionInterrupts  map[string]func(string)
+	transmissionInterrupts map[string]func([]string)
+	addr                   *net.TCPAddr
 }
 
 func Must(err error) {
@@ -27,10 +28,22 @@ func Must(err error) {
 	}
 }
 
-func (self *interruptHandler) InterruptorInterrupt(interrupt common.InterruptedConsumption, unused *struct{}) (err error) {
+func (self *interruptHandler) InterruptorInterruptedTransmission(interrupt common.InterruptedTransmission, unused *struct{}) (err error) {
 	self.lock.RLock()
 	defer self.lock.RUnlock()
-	f, found := self.interrupts[interrupt.Name]
+	f, found := self.transmissionInterrupts[interrupt.Name]
+	if !found {
+		err = fmt.Errorf("No registered interrupt %#v", interrupt.Name)
+		return
+	}
+	f(interrupt.Match)
+	return
+}
+
+func (self *interruptHandler) InterruptorInterruptedConsumption(interrupt common.InterruptedConsumption, unused *struct{}) (err error) {
+	self.lock.RLock()
+	defer self.lock.RUnlock()
+	f, found := self.consumptionInterrupts[interrupt.Name]
 	if !found {
 		err = fmt.Errorf("No registered interrupt %#v", interrupt.Name)
 		return
@@ -39,21 +52,34 @@ func (self *interruptHandler) InterruptorInterrupt(interrupt common.InterruptedC
 	return
 }
 
-func (self *interruptHandler) register(name string, f func(string)) (err error) {
+func (self *interruptHandler) registerTransmissionInterrupt(name string, f func([]string)) (err error) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
-	if len(self.interrupts) == 0 {
+	if len(self.transmissionInterrupts) == 0 {
 		if self.addr, _, err = mdnsrpc.Service(self); err != nil {
 			return
 		}
 	}
-	self.interrupts[name] = f
+	self.transmissionInterrupts[name] = f
+	return
+}
+
+func (self *interruptHandler) registerConsumptionInterrupt(name string, f func(string)) (err error) {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+	if len(self.consumptionInterrupts) == 0 {
+		if self.addr, _, err = mdnsrpc.Service(self); err != nil {
+			return
+		}
+	}
+	self.consumptionInterrupts[name] = f
 	return
 }
 
 var handler = interruptHandler{
-	lock:       &sync.RWMutex{},
-	interrupts: map[string]func(string){},
+	lock: &sync.RWMutex{},
+	consumptionInterrupts:  map[string]func(string){},
+	transmissionInterrupts: map[string]func([]string){},
 }
 
 func interruptConsumption(interrupt common.ConsumptionInterrupt, h func(string)) (err error) {
@@ -61,7 +87,7 @@ func interruptConsumption(interrupt common.ConsumptionInterrupt, h func(string))
 	if err != nil {
 		return
 	}
-	if err = handler.register(interrupt.Name, h); err != nil {
+	if err = handler.registerConsumptionInterrupt(interrupt.Name, h); err != nil {
 		return
 	}
 	interrupt.Addr = fmt.Sprintf("%v:%v", handler.addr.IP.String(), handler.addr.Port)
@@ -78,6 +104,36 @@ func InterruptConsumption(name, pattern string, handler func(string)) (err error
 		Name:    name,
 		Pattern: pattern,
 	}, handler)
+}
+
+func InterruptTransmission(name, pattern string, h func([]string)) (err error) {
+	controllers, err := mdnsrpc.LookupAll(common.Controller)
+	if err != nil {
+		return
+	}
+	interrupt := common.TransmissionInterrupt{
+		Name:    name,
+		Pattern: pattern,
+	}
+	if err = handler.registerTransmissionInterrupt(interrupt.Name, h); err != nil {
+		return
+	}
+	interrupt.Addr = fmt.Sprintf("%v:%v", handler.addr.IP.String(), handler.addr.Port)
+	for _, client := range controllers {
+		if err = client.Call(common.ControllerInterruptTransmission, interrupt, nil); err != nil {
+			return
+		}
+	}
+	return
+}
+
+func TransmitMany(lines []string) (err error) {
+	for _, line := range lines {
+		if err = Transmit(line); err != nil {
+			return
+		}
+	}
+	return
 }
 
 func TransmitAndInterruptN(n int, trans string, pattern string, h func(string)) (err error) {
