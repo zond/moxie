@@ -51,6 +51,8 @@ func (self *Proxy) Log(s string, unused *struct{}) (err error) {
 }
 
 func (self *Proxy) consume() {
+	lastConsumers := mdnsrpc.Clients{}
+	lastSubscribers := mdnsrpc.Clients{}
 	for b := range self.buffer {
 		var consumers []*mdnsrpc.Client
 		var err error
@@ -62,6 +64,10 @@ func (self *Proxy) consume() {
 				}
 			}
 			time.Sleep(time.Second / 2)
+		}
+		if !lastConsumers.Equals(consumers) {
+			log.Printf("New consumers found: %+v", consumers)
+			lastConsumers = consumers
 		}
 		for _, client := range consumers {
 			if err := client.Call(common.ConsumerConsume, b, nil); err != nil {
@@ -75,6 +81,10 @@ func (self *Proxy) consume() {
 			} else {
 				self.Log(err.Error(), nil)
 			}
+		}
+		if !lastSubscribers.Equals(subscribers) {
+			log.Printf("New subscribers found: %+v", subscribers)
+			lastSubscribers = subscribers
 		}
 		for _, client := range subscribers {
 			if err := client.Call(common.SubscriberReceive, b, nil); err != nil {

@@ -61,19 +61,19 @@ func (self *Consumer) checkInterrupts(buf *bytes.Buffer) {
 	for name, interrupt := range self.interrupts {
 		before, content, after, found, err := interrupt.FindMatch(buf.String())
 		if err != nil {
-			self.Log(err.Error(), nil)
+			self.Log(fmt.Sprintf("ERROR while checking interrupt %+v: %v", interrupt, err), nil)
 			delete(self.interrupts, name)
 		} else if found {
 			client, err := mdnsrpc.Connect(interrupt.Addr)
 			if err != nil {
-				self.Log(err.Error(), nil)
+				self.Log(fmt.Sprintf("ERROR while finding client for interrupt %+v: %v", interrupt, err), nil)
 				delete(self.interrupts, name)
 			} else {
 				if err := client.Call(common.InterruptorInterruptedConsumption, common.InterruptedConsumption{
 					Name:    name,
 					Content: content,
 				}, nil); err != nil {
-					self.Log(err.Error(), nil)
+					self.Log(fmt.Sprintf("ERROR while calling client for interrupt %+v: %v", interrupt, err), nil)
 					delete(self.interrupts, name)
 				} else {
 					if interrupt.Times != 0 {

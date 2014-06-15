@@ -171,6 +171,22 @@ func interruptConsumption(interrupt common.ConsumptionInterrupt, h func(string))
 	return
 }
 
+func InterruptConsumptionN(n int, name, pattern string, handler func(string)) (err error) {
+	return interruptConsumption(common.ConsumptionInterrupt{
+		Name:    name,
+		Pattern: pattern,
+		Times:   n,
+	}, handler)
+}
+
+func InterruptConsumptionOnce(name, pattern string, handler func(string)) (err error) {
+	return interruptConsumption(common.ConsumptionInterrupt{
+		Name:    name,
+		Pattern: pattern,
+		Times:   1,
+	}, handler)
+}
+
 func InterruptConsumption(name, pattern string, handler func(string)) (err error) {
 	return interruptConsumption(common.ConsumptionInterrupt{
 		Name:    name,
