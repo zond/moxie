@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"regexp"
 	"sync"
 
 	"github.com/zond/mdnsrpc"
@@ -15,11 +16,20 @@ func Wait() {
 	<-done
 }
 
+type receiveHook struct {
+	name   string
+	regexp *regexp.Regexp
+	fun    func([]string)
+	times  int
+}
+
 type interruptHandler struct {
 	lock                   *sync.RWMutex
 	consumptionInterrupts  map[string]func(string)
 	transmissionInterrupts map[string]func([]string)
+	receiveHooks           map[string]*receiveHook
 	addr                   *net.TCPAddr
+	published              bool
 }
 
 func Must(err error) {
@@ -28,12 +38,47 @@ func Must(err error) {
 	}
 }
 
+func (self *interruptHandler) SubscriberTransmit(b []byte, unused *struct{}) (err error) {
+	return
+}
+
+func (self *interruptHandler) SubscriberReceive(b []byte, unused *struct{}) (err error) {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+	for name, hook := range self.receiveHooks {
+		if match := hook.regexp.FindStringSubmatch(string(b)); match != nil {
+			self.lock.Unlock()
+			func() {
+				defer self.lock.Lock()
+				hook.fun(match)
+			}()
+			if hook.times != 0 {
+				hook.times -= 1
+				if hook.times == 0 {
+					delete(self.receiveHooks, name)
+				}
+			}
+		}
+	}
+	return
+}
+
+func (self *interruptHandler) SubscriberLog(s string, unused *struct{}) (err error) {
+	return
+}
 func (self *interruptHandler) InterruptorInterruptedTransmission(interrupt common.InterruptedTransmission, unused *struct{}) (err error) {
 	self.lock.RLock()
-	defer self.lock.RUnlock()
-	f, found := self.transmissionInterrupts[interrupt.Name]
-	if !found {
-		err = fmt.Errorf("No registered interrupt %#v", interrupt.Name)
+	var f func([]string)
+	if err = func() (err error) {
+		defer self.lock.RUnlock()
+		found := false
+		f, found = self.transmissionInterrupts[interrupt.Name]
+		if !found {
+			err = fmt.Errorf("No registered interrupt %#v", interrupt.Name)
+			return
+		}
+		return
+	}(); err != nil {
 		return
 	}
 	f(interrupt.Match)
@@ -42,35 +87,61 @@ func (self *interruptHandler) InterruptorInterruptedTransmission(interrupt commo
 
 func (self *interruptHandler) InterruptorInterruptedConsumption(interrupt common.InterruptedConsumption, unused *struct{}) (err error) {
 	self.lock.RLock()
-	defer self.lock.RUnlock()
-	f, found := self.consumptionInterrupts[interrupt.Name]
-	if !found {
-		err = fmt.Errorf("No registered interrupt %#v", interrupt.Name)
+	var f func(string)
+	if err = func() (err error) {
+		defer self.lock.RUnlock()
+		found := false
+		f, found = self.consumptionInterrupts[interrupt.Name]
+		if !found {
+			err = fmt.Errorf("No registered interrupt %#v", interrupt.Name)
+			return
+		}
+		return
+	}(); err != nil {
 		return
 	}
 	f(interrupt.Content)
 	return
 }
 
+func (self *interruptHandler) registerReceiveHook(hook *receiveHook) (err error) {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+	if err = self.publish(); err != nil {
+		return
+	}
+	self.receiveHooks[hook.name] = hook
+	return
+}
+
 func (self *interruptHandler) registerTransmissionInterrupt(name string, f func([]string)) (err error) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
-	if len(self.transmissionInterrupts) == 0 {
+	if err = self.publish(); err != nil {
+		return
+	}
+	self.transmissionInterrupts[name] = f
+	return
+}
+
+func (self *interruptHandler) publish() (err error) {
+	if !self.published {
 		if self.addr, _, err = mdnsrpc.Service(self); err != nil {
 			return
 		}
+		if _, err = mdnsrpc.Publish(common.Subscriber, self); err != nil {
+			return
+		}
+		self.published = true
 	}
-	self.transmissionInterrupts[name] = f
 	return
 }
 
 func (self *interruptHandler) registerConsumptionInterrupt(name string, f func(string)) (err error) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
-	if len(self.consumptionInterrupts) == 0 {
-		if self.addr, _, err = mdnsrpc.Service(self); err != nil {
-			return
-		}
+	if err = self.publish(); err != nil {
+		return
 	}
 	self.consumptionInterrupts[name] = f
 	return
@@ -80,6 +151,7 @@ var handler = interruptHandler{
 	lock: &sync.RWMutex{},
 	consumptionInterrupts:  map[string]func(string){},
 	transmissionInterrupts: map[string]func([]string){},
+	receiveHooks:           map[string]*receiveHook{},
 }
 
 func interruptConsumption(interrupt common.ConsumptionInterrupt, h func(string)) (err error) {
@@ -127,9 +199,41 @@ func InterruptTransmission(name, pattern string, h func([]string)) (err error) {
 	return
 }
 
+func ReceiveHookOnce(name, pattern string, h func([]string)) (err error) {
+	reg, err := regexp.Compile(pattern)
+	if err != nil {
+		return
+	}
+	hook := &receiveHook{
+		name:   name,
+		regexp: reg,
+		fun:    h,
+		times:  1,
+	}
+	return handler.registerReceiveHook(hook)
+}
+
+func ReceiveHookN(times int, name, pattern string, h func([]string)) (err error) {
+	reg, err := regexp.Compile(pattern)
+	if err != nil {
+		return
+	}
+	hook := &receiveHook{
+		name:   name,
+		regexp: reg,
+		fun:    h,
+		times:  times,
+	}
+	return handler.registerReceiveHook(hook)
+}
+
 func TransmitMany(lines []string) (err error) {
+	client, err := mdnsrpc.LookupOne(common.Proxy)
+	if err != nil {
+		return
+	}
 	for _, line := range lines {
-		if err = Transmit(line); err != nil {
+		if err = client.Call(common.ProxyTransmit, line+"\n", nil); err != nil {
 			return
 		}
 	}
@@ -152,12 +256,5 @@ func TransmitAndInterruptOnce(trans string, pattern string, h func(string)) (err
 }
 
 func Transmit(s string) (err error) {
-	client, err := mdnsrpc.LookupOne(common.Proxy)
-	if err != nil {
-		return
-	}
-	if err = client.Call(common.ProxyTransmit, s+"\n", nil); err != nil {
-		return
-	}
-	return
+	return TransmitMany([]string{s})
 }
