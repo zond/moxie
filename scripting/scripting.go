@@ -16,18 +16,30 @@ func Wait() {
 	<-done
 }
 
-type receiveHook struct {
+type ReceiveHookHandles []*ReceiveHookHandle
+
+func (self ReceiveHookHandles) Unregister() {
+	for _, handle := range self {
+		handle.Unregister()
+	}
+}
+
+type ReceiveHookHandle struct {
 	name   string
 	regexp *regexp.Regexp
 	fun    func([]string)
 	times  int
 }
 
+func (self *ReceiveHookHandle) Unregister() {
+	handler.unregisterReceiveHook(self.name)
+}
+
 type interruptHandler struct {
 	lock                   *sync.RWMutex
 	consumptionInterrupts  map[string]func(string)
 	transmissionInterrupts map[string]func([]string)
-	receiveHooks           map[string]*receiveHook
+	receiveHooks           map[string]*ReceiveHookHandle
 	addr                   *net.TCPAddr
 	published              bool
 }
@@ -36,6 +48,13 @@ func Must(err error) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func MustReceiveHookHandle(h *ReceiveHookHandle, err error) *ReceiveHookHandle {
+	if err != nil {
+		panic(err)
+	}
+	return h
 }
 
 func (self *interruptHandler) SubscriberTransmit(b []byte, unused *struct{}) (err error) {
@@ -104,7 +123,13 @@ func (self *interruptHandler) InterruptorInterruptedConsumption(interrupt common
 	return
 }
 
-func (self *interruptHandler) registerReceiveHook(hook *receiveHook) (err error) {
+func (self *interruptHandler) unregisterReceiveHook(name string) {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+	delete(self.receiveHooks, name)
+}
+
+func (self *interruptHandler) registerReceiveHook(hook *ReceiveHookHandle) (err error) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 	if err = self.publish(); err != nil {
@@ -151,7 +176,7 @@ var handler = interruptHandler{
 	lock: &sync.RWMutex{},
 	consumptionInterrupts:  map[string]func(string){},
 	transmissionInterrupts: map[string]func([]string){},
-	receiveHooks:           map[string]*receiveHook{},
+	receiveHooks:           map[string]*ReceiveHookHandle{},
 }
 
 func interruptConsumption(interrupt common.ConsumptionInterrupt, h func(string)) (err error) {
@@ -215,32 +240,29 @@ func InterruptTransmission(name, pattern string, h func([]string)) (err error) {
 	return
 }
 
-func ReceiveHookOnce(name, pattern string, h func([]string)) (err error) {
-	reg, err := regexp.Compile(pattern)
-	if err != nil {
-		return
-	}
-	hook := &receiveHook{
-		name:   name,
-		regexp: reg,
-		fun:    h,
-		times:  1,
-	}
-	return handler.registerReceiveHook(hook)
+func ReceiveHook(name, pattern string, h func([]string)) (result *ReceiveHookHandle, err error) {
+	return ReceiveHookN(0, name, pattern, h)
 }
 
-func ReceiveHookN(times int, name, pattern string, h func([]string)) (err error) {
+func ReceiveHookOnce(name, pattern string, h func([]string)) (result *ReceiveHookHandle, err error) {
+	return ReceiveHookN(1, name, pattern, h)
+}
+
+func ReceiveHookN(times int, name, pattern string, h func([]string)) (result *ReceiveHookHandle, err error) {
 	reg, err := regexp.Compile(pattern)
 	if err != nil {
 		return
 	}
-	hook := &receiveHook{
+	result = &ReceiveHookHandle{
 		name:   name,
 		regexp: reg,
 		fun:    h,
 		times:  times,
 	}
-	return handler.registerReceiveHook(hook)
+	if err = handler.registerReceiveHook(result); err != nil {
+		return
+	}
+	return
 }
 
 func TransmitMany(lines []string) (err error) {

@@ -50,29 +50,36 @@ func (self *Proxy) Log(s string, unused *struct{}) (err error) {
 	return
 }
 
+func (self *Proxy) sendToConsumers(b []byte) (consumers mdnsrpc.Clients, err error) {
+	for len(consumers) == 0 {
+		consumers, err = mdnsrpc.LookupAll(common.Consumer)
+		if err != nil {
+			if _, ok := err.(mdnsrpc.NoSuchService); !ok {
+				self.Log(err.Error(), nil)
+			}
+		}
+		time.Sleep(time.Second / 2)
+	}
+	for _, client := range consumers {
+		if err = client.Call(common.ConsumerConsume, b, nil); err != nil {
+			return
+		}
+	}
+	return
+}
+
 func (self *Proxy) consume() {
 	lastConsumers := mdnsrpc.Clients{}
 	lastSubscribers := mdnsrpc.Clients{}
 	for b := range self.buffer {
-		var consumers []*mdnsrpc.Client
 		var err error
-		for len(consumers) == 0 {
-			consumers, err = mdnsrpc.LookupAll(common.Consumer)
-			if err != nil {
-				if _, ok := err.(mdnsrpc.NoSuchService); !ok {
-					self.Log(err.Error(), nil)
-				}
-			}
+		var consumers mdnsrpc.Clients
+		for consumers, err = self.sendToConsumers(b); err != nil; consumers, err = self.sendToConsumers(b) {
 			time.Sleep(time.Second / 2)
 		}
 		if !lastConsumers.Equals(consumers) {
 			log.Printf("New consumers found: %+v", consumers)
 			lastConsumers = consumers
-		}
-		for _, client := range consumers {
-			if err := client.Call(common.ConsumerConsume, b, nil); err != nil {
-				self.Log(err.Error(), nil)
-			}
 		}
 		subscribers, err := mdnsrpc.LookupAll(common.Subscriber)
 		if err != nil {

@@ -301,6 +301,17 @@ func (self *Controller) updateHistorySearch() (err error) {
 	return
 }
 
+func (self *Controller) sendToProxy(buffer []rune) (err error) {
+	var client *mdnsrpc.Client
+	if client, err = mdnsrpc.LookupOne(common.Proxy); err != nil {
+		return
+	}
+	if err = client.Call(common.ProxyTransmit, string(self.buffer)+"\n", nil); err != nil {
+		return
+	}
+	return
+}
+
 func (self *Controller) handle(ev termbox.Event) (err error) {
 	switch ev.Type {
 	case termbox.EventKey:
@@ -353,12 +364,8 @@ func (self *Controller) handle(ev termbox.Event) (err error) {
 							}
 						}()
 						if !interrupted {
-							var client *mdnsrpc.Client
-							if client, err = mdnsrpc.LookupOne(common.Proxy); err != nil {
-								return
-							}
-							if err = client.Call(common.ProxyTransmit, string(self.buffer)+"\n", nil); err != nil {
-								return
+							for err := self.sendToProxy(self.buffer); err != nil; err = self.sendToProxy(self.buffer) {
+								time.Sleep(time.Second / 2)
 							}
 						}
 						if err = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
