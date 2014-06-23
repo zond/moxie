@@ -3,15 +3,30 @@ package common
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"regexp"
 )
 
+var (
+	Proxy      = "%v_moxie_Proxy"
+	Consumer   = "%v_moxie_Consumer"
+	Subscriber = "%v_moxie_Subscriber"
+	Controller = "%v_moxie_Controller"
+)
+
+func init() {
+	hostname, err := os.Hostname()
+	if err != nil {
+		panic(err)
+	}
+	Proxy = fmt.Sprintf(Proxy, hostname)
+	Consumer = fmt.Sprintf(Consumer, hostname)
+	Subscriber = fmt.Sprintf(Subscriber, hostname)
+	Controller = fmt.Sprintf(Controller, hostname)
+}
+
 const (
-	Proxy                              = "moxie_Proxy"
-	Consumer                           = "moxie_Consumer"
-	Subscriber                         = "moxie_Subscriber"
 	ProxyTransmit                      = "ProxyTransmit"
-	Controller                         = "moxie_Controller"
 	SubscriberTransmit                 = "SubscriberTransmit"
 	SubscriberReceive                  = "SubscriberReceive"
 	SubscriberLog                      = "SubscriberLog"
