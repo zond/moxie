@@ -2,6 +2,7 @@ package scripting
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"regexp"
@@ -25,10 +26,13 @@ func (self ReceiveHookHandles) Unregister() {
 }
 
 type ReceiveHookHandle struct {
-	name   string
-	regexp *regexp.Regexp
-	fun    func([]string)
-	times  int
+	name         string
+	regexp       *regexp.Regexp
+	beforeGroup  int
+	contentGroup int
+	afterGroup   int
+	fun          func([]string)
+	times        int
 }
 
 func (self *ReceiveHookHandle) Unregister() {
@@ -42,6 +46,23 @@ type interruptHandler struct {
 	receiveHooks           map[string]*ReceiveHookHandle
 	addr                   *net.TCPAddr
 	published              bool
+}
+
+func Log(s string) (err error) {
+	loggers, err := mdnsrpc.LookupAll(common.Subscriber)
+	if err != nil {
+		return
+	}
+	if len(loggers) == 0 {
+		log.Printf("%v", err.Error())
+	} else {
+		for _, client := range loggers {
+			if err := client.Call(common.SubscriberLog, s, nil); err != nil {
+				log.Printf("%v", err.Error())
+			}
+		}
+	}
+	return
 }
 
 func Must(err error) {
@@ -69,8 +90,9 @@ func (self *interruptHandler) SubscriberReceive(b []byte, unused *struct{}) (err
 			self.lock.Unlock()
 			func() {
 				defer self.lock.Lock()
-				hook.fun(match)
+				hook.fun(match[hook.contentGroup:hook.afterGroup])
 			}()
+			go self.SubscriberReceive([]byte(match[hook.beforeGroup]+match[hook.afterGroup]), nil)
 			if hook.times != 0 {
 				hook.times -= 1
 				if hook.times == 0 {
@@ -249,7 +271,7 @@ func ReceiveHookOnce(name, pattern string, h func([]string)) (result *ReceiveHoo
 }
 
 func ReceiveHookN(times int, name, pattern string, h func([]string)) (result *ReceiveHookHandle, err error) {
-	reg, err := regexp.Compile(pattern)
+	reg, err := regexp.Compile("(?ms)(?P<BEFORE>.*?)(?P<CONTENT>" + pattern + ")(?P<AFTER>.*)")
 	if err != nil {
 		return
 	}
@@ -258,6 +280,16 @@ func ReceiveHookN(times int, name, pattern string, h func([]string)) (result *Re
 		regexp: reg,
 		fun:    h,
 		times:  times,
+	}
+	for index, name := range reg.SubexpNames() {
+		switch name {
+		case "BEFORE":
+			result.beforeGroup = index
+		case "CONTENT":
+			result.contentGroup = index
+		case "AFTER":
+			result.afterGroup = index
+		}
 	}
 	if err = handler.registerReceiveHook(result); err != nil {
 		return

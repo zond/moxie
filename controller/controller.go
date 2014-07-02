@@ -463,7 +463,7 @@ func (self *Controller) Control(unused struct{}, unused2 *struct{}) (err error) 
 	if err = os.MkdirAll(self.dir, 0700); err != nil && !os.IsExist(err) {
 		return
 	}
-	if self.db, err = bolt.Open(filepath.Join(self.dir, "controller.db"), 0700); err != nil {
+	if self.db, err = bolt.Open(filepath.Join(self.dir, "controller.db"), 0700, nil); err != nil {
 		return
 	}
 	if err = termbox.Init(); err != nil {
