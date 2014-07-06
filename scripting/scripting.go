@@ -48,6 +48,25 @@ type interruptHandler struct {
 	published              bool
 }
 
+func MustTransmit(s ...string) {
+	Must(TransmitMany(s))
+}
+
+func Hook(name, reg string, cb func(m []string, hooks ReceiveHookHandles)) (result ReceiveHookHandles) {
+	result = append(result, MustReceiveHookHandle(ReceiveHook(name, reg, func(match []string) {
+		cb(match, result)
+	})))
+	return
+}
+
+func Do(what, reg string, cb func()) {
+	Hook(fmt.Sprintf("do %v", what), reg, func(m []string, hooks ReceiveHookHandles) {
+		hooks.Unregister()
+		cb()
+	})
+	MustTransmit(what)
+}
+
 func Log(s string) (err error) {
 	loggers, err := mdnsrpc.LookupAll(common.Subscriber)
 	if err != nil {
